@@ -19,9 +19,10 @@ server. It automatically handles environment synchronization for
 - [uv](https://docs.astral.sh/uv/) - fast Python package installer and resolver
 - One of the following language servers:
   - [ty](https://github.com/astral-sh/ty) (>= v0.0.8) - Astral's new Python type
-    checker
+    checker. It can be installed globally or in a project-root `.venv`.
   - [basedpyright](https://github.com/DetachHead/basedpyright) - fork of pyright
-    with additional features
+    with additional features. It can be installed globally or in a project-root
+    `.venv`.
 
 ## Installation
 
@@ -160,6 +161,9 @@ Example to disable auto-import completions and set type checking mode:
 
 - The package uses `uv` for all Python environment management. Ensure `uv` is
   installed and in your PATH.
+- For standard Python projects, the package prefers `ty` or
+  `basedpyright-langserver` from a project-root `.venv` and otherwise falls back
+  to PATH.
 - For PEP-723 scripts, environments are cached by `uv` and shared across
   sessions.
 - If you see a warning about the environment not being synced, run

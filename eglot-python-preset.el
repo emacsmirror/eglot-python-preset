@@ -160,6 +160,32 @@ Given a path like /path/to/env/bin/python3, return /path/to/env/."
       (when (string-match-p "/bin/?$" bin-dir)
         (file-name-directory (directory-file-name bin-dir))))))
 
+(defun eglot-python-preset--project-root ()
+  "Return the current buffer's project root."
+  (when-let* ((file (buffer-file-name))
+              (project (eglot-python-preset--project-find
+                        (file-name-directory file))))
+    (project-root project)))
+
+(defun eglot-python-preset--venv-bin-dirs ()
+  "Return candidate local virtualenv executable directories."
+  (when-let* ((root (eglot-python-preset--project-root))
+              (venv-dir (expand-file-name ".venv/" root)))
+    (delq nil
+          (mapcar (lambda (path)
+                    (when (file-directory-p path)
+                      path))
+                  (list (expand-file-name "bin" venv-dir)
+                        (expand-file-name "Scripts" venv-dir))))))
+
+(defun eglot-python-preset--resolve-executable (name)
+  "Resolve executable NAME, preferring the current project's local `.venv'."
+  (or (cl-loop for dir in (eglot-python-preset--venv-bin-dirs)
+               thereis (let ((exec-path (cons dir exec-path)))
+                         (executable-find name)))
+      (executable-find name)
+      name))
+
 (defun eglot-python-preset--merge-plists (base override)
   "Recursively merge OVERRIDE plist into BASE plist.
 
@@ -220,8 +246,12 @@ Only used for ty; basedpyright uses workspace configuration instead."
 
 Includes initializationOptions for ty with PEP-723 scripts."
   (let ((command (pcase eglot-python-preset-lsp-server
-                   ('ty '("ty" "server"))
-                   ('basedpyright '("basedpyright-langserver" "--stdio"))))
+                   ('ty (list (eglot-python-preset--resolve-executable "ty")
+                              "server"))
+                   ('basedpyright
+                    (list (eglot-python-preset--resolve-executable
+                           "basedpyright-langserver")
+                          "--stdio"))))
         (init-options (eglot-python-preset--init-options)))
     (if init-options
         `(,@command :initializationOptions ,init-options)

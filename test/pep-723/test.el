@@ -13,6 +13,12 @@
 (defvar my-pep723-test-script-1 (expand-file-name "example-1.py" my-pep723-test-dir))
 (defvar my-pep723-test-script-2 (expand-file-name "example-2.py" my-pep723-test-dir))
 
+(defun my-pep723-write-executable (path)
+  "Create an executable file at PATH."
+  (with-temp-file path
+    (insert "#!/bin/bash\nexit 0\n"))
+  (set-file-modes path #o755))
+
 (defun my-pep723-run-tests ()
   "Run PEP-723 tests and report results."
 
@@ -70,6 +76,72 @@
             (princ "PASS\n")
           (princ "FAIL\n")
           (kill-emacs 1)))))
+
+  (princ "Test 5b: Server contact prefers local ty from .venv... ")
+  (let ((eglot-python-preset-lsp-server 'ty)
+        (project-dir (make-temp-file "test-project" t)))
+    (unwind-protect
+        (let* ((venv-bin-dir (expand-file-name ".venv/bin" project-dir))
+               (ty-path (expand-file-name "ty" venv-bin-dir))
+               (python-file (expand-file-name "main.py" project-dir)))
+          (make-directory venv-bin-dir t)
+          (with-temp-file (expand-file-name "pyproject.toml" project-dir))
+          (my-pep723-write-executable ty-path)
+          (with-temp-file python-file
+            (insert "print('hello')\n"))
+          (with-current-buffer (find-file-noselect python-file)
+            (let ((contact (eglot-python-preset--server-contact nil)))
+              (if (equal (car contact) ty-path)
+                  (princ "PASS\n")
+                (princ (format "FAIL (got %S)\n" contact))
+                (kill-emacs 1)))))
+      (delete-directory project-dir t)))
+
+  (princ "Test 5c: Server contact prefers local basedpyright from .venv... ")
+  (let ((eglot-python-preset-lsp-server 'basedpyright)
+        (project-dir (make-temp-file "test-project" t)))
+    (unwind-protect
+        (let* ((venv-bin-dir (expand-file-name ".venv/bin" project-dir))
+               (langserver-path (expand-file-name "basedpyright-langserver"
+                                                  venv-bin-dir))
+               (python-file (expand-file-name "main.py" project-dir)))
+          (make-directory venv-bin-dir t)
+          (with-temp-file (expand-file-name "pyproject.toml" project-dir))
+          (my-pep723-write-executable langserver-path)
+          (with-temp-file python-file
+            (insert "print('hello')\n"))
+          (with-current-buffer (find-file-noselect python-file)
+            (let ((contact (eglot-python-preset--server-contact nil)))
+              (if (equal (car contact) langserver-path)
+                  (princ "PASS\n")
+                (princ (format "FAIL (got %S)\n" contact))
+                (kill-emacs 1)))))
+      (delete-directory project-dir t)))
+
+  (princ "Test 5d: PEP-723 script prefers local ty from script project root... ")
+  (let ((eglot-python-preset-lsp-server 'ty)
+        (project-dir (make-temp-file "test-project" t)))
+    (unwind-protect
+        (let* ((venv-bin-dir (expand-file-name ".venv/bin" project-dir))
+               (ty-path (expand-file-name "ty" venv-bin-dir))
+               (python-file (expand-file-name "main.py" project-dir)))
+          (make-directory venv-bin-dir t)
+          (my-pep723-write-executable ty-path)
+          (with-temp-file python-file
+            (insert "# /// script\n")
+            (insert "# dependencies = []\n")
+            (insert "# ///\n\n")
+            (insert "print('hello')\n"))
+          (with-current-buffer (find-file-noselect python-file)
+            (let ((contact (cl-letf (((symbol-function
+                                      'eglot-python-preset--init-options)
+                                     (lambda () nil)))
+                             (eglot-python-preset--server-contact nil))))
+              (if (equal (car contact) ty-path)
+                  (princ "PASS\n")
+                (princ (format "FAIL (got %S)\n" contact))
+                (kill-emacs 1)))))
+      (delete-directory project-dir t)))
 
   (princ "Test 6a: Workspace config advice with directory path (basedpyright)... ")
   (let ((eglot-python-preset-lsp-server 'basedpyright))
