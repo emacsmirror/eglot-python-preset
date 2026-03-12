@@ -157,6 +157,14 @@ Example to disable auto-import completions and set type checking mode:
 (eglot-python-preset-setup)
 ```
 
+## Troubleshooting
+
+- Eglot publishes diagnostics through Flymake. If you are using Flycheck, you
+  will need separate bridge or integration configuration in your Emacs setup.
+- If `ty` or `basedpyright-langserver` is installed only in a project-local
+  `.venv`, make sure you are using v0.3.0 or later so this package can prefer
+  that executable automatically.
+
 ## Notes
 
 - The package uses `uv` for all Python environment management. Ensure `uv` is
