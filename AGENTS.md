@@ -33,8 +33,8 @@ Run live smoke tests with:
 bun run test:live
 ```
 
-This enables the opt-in `rass` integration coverage in the same test file. It
-is slower than `bun run test`, so do not run it by default after every edit.
+This enables the opt-in `rass` integration coverage in the same test file. It is
+slower than `bun run test`, so do not run it by default after every edit.
 
 Good times to run `bun run test:live`:
 
@@ -69,8 +69,8 @@ If you only need one part of that checklist, you can run the sub-commands
 directly.
 
 The local source of truth for the MELPA recipe is `eglot-python-preset.recipe`
-at the repository root. The local install check and Melpazoid workflow both
-read from that file.
+at the repository root. The local install check and Melpazoid workflow both read
+from that file.
 
 `bun run check:melpa:install` performs a local `package-build` build/install
 using a temporary snapshot repository outside the working tree. Keep that temp
