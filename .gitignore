@@ -16,5 +16,8 @@ dist/
 # Backup files
 *~
 
+# Temp files
+tmp/
+
 # Undo-tree save-files
 *.~undo-tree

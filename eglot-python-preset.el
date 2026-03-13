@@ -66,6 +66,7 @@
 ;;; Code:
 
 (require 'cl-lib)
+(require 'json)
 
 (declare-function eglot--managed-buffers "eglot")
 (declare-function eglot-current-server "eglot")
@@ -84,7 +85,48 @@
 (defcustom eglot-python-preset-lsp-server 'ty
   "LSP server to use for Python files."
   :type '(choice (const :tag "ty" ty)
-                 (const :tag "basedpyright" basedpyright))
+                 (const :tag "basedpyright" basedpyright)
+                 (const :tag "rass" rass))
+  :group 'eglot-python-preset)
+
+;;;###autoload
+(defcustom eglot-python-preset-rass-program "rass"
+  "Program used when `eglot-python-preset-lsp-server' is `rass'."
+  :type 'string
+  :group 'eglot-python-preset)
+
+(defcustom eglot-python-preset-rass-max-contextual-presets 50
+  "Maximum number of contextual generated `rass` presets to keep.
+
+When more contextual presets are present in the generated preset directory,
+older ones are deleted.  Shared presets are not affected."
+  :type '(choice (const :tag "Disable cleanup" nil)
+                 (integer :tag "Maximum contextual presets"))
+  :group 'eglot-python-preset)
+
+(defun eglot-python-preset--rass-command-vector-p (value)
+  "Return non-nil if VALUE is a vector-form literal command."
+  (and (vectorp value)
+       (> (length value) 0)
+       (seq-every-p #'stringp value)))
+
+;;;###autoload
+(defcustom eglot-python-preset-rass-tools '(ty ruff)
+  "Tools included in the generated `rass` preset.
+
+Each entry may be a supported symbol like `ty', `ruff', or `basedpyright',
+or a literal command vector of strings.  Literal commands are passed through
+as-is, except that known executables still get local `.venv` resolution and
+any supported special handling."
+  :type '(repeat
+          (choice
+           (const :tag "basedpyright" basedpyright)
+           (const :tag "ruff" ruff)
+           (const :tag "ty" ty)
+           (restricted-sexp
+            :tag "Command vector"
+            :value ["command"]
+            :match-alternatives (eglot-python-preset--rass-command-vector-p))))
   :group 'eglot-python-preset)
 
 ;;;###autoload
@@ -95,7 +137,7 @@
   :group 'eglot-python-preset)
 
 (defun eglot-python-preset-has-metadata-p ()
-  "Return non-nil if current buffer contains PEP-723 script metadata."
+  "Return non-nil if current buffer has PEP-723 script metadata."
   (let ((case-fold-search nil))
     (when (buffer-file-name)
       (save-match-data
@@ -186,6 +228,293 @@ Given a path like /path/to/env/bin/python3, return /path/to/env/."
       (executable-find name)
       name))
 
+(defun eglot-python-preset--pep-723-context ()
+  "Return PEP-723 environment context for the current buffer, or nil."
+  (when-let* ((file (buffer-file-name))
+              ((eglot-python-preset-has-metadata-p))
+              (script-dir (file-name-directory file))
+              (python-path (eglot-python-preset-get-python-path file)))
+    (list :python-path python-path
+          :script-dir script-dir
+          :env-dir (or (eglot-python-preset--python-env-dir python-path)
+                       python-path))))
+
+(defun eglot-python-preset--ty-configuration (&optional context)
+  "Return ty configuration for CONTEXT."
+  (when-let* ((context (or context (eglot-python-preset--pep-723-context)))
+              (env-dir (plist-get context :env-dir))
+              (script-dir (plist-get context :script-dir)))
+    `(:configuration
+      (:environment
+       (:python ,env-dir
+        :root [,script-dir])))))
+
+(defun eglot-python-preset--basedpyright-python-configuration (&optional context)
+  "Return basedpyright Python configuration for CONTEXT."
+  (when-let* ((context (or context (eglot-python-preset--pep-723-context)))
+              (python-path (plist-get context :python-path)))
+    `(:pythonPath ,python-path)))
+
+(defun eglot-python-preset--tool-kind-from-name (name)
+  "Return the known tool kind for executable NAME, or nil."
+  (when name
+    (let ((base (downcase (file-name-sans-extension
+                           (file-name-nondirectory name)))))
+      (cond
+       ((member base '("basedpyright" "basedpyright-langserver"))
+        'basedpyright)
+       ((string= base "ruff")
+        'ruff)
+       ((string= base "ty")
+        'ty)))))
+
+(defun eglot-python-preset--rass-tool-command (tool)
+  "Return the server command for `rass` TOOL."
+  (cond
+   ((eq tool 'basedpyright)
+    (list (eglot-python-preset--resolve-executable "basedpyright-langserver")
+          "--stdio"))
+   ((eq tool 'ruff)
+    (list (eglot-python-preset--resolve-executable "ruff")
+          "server"))
+   ((eq tool 'ty)
+    (list (eglot-python-preset--resolve-executable "ty")
+          "server"))
+   ((vectorp tool)
+    (let* ((command (append tool nil))
+           (kind (eglot-python-preset--tool-kind-from-name (car command))))
+      (when kind
+        (setcar command (eglot-python-preset--resolve-executable (car command))))
+      command))
+   (t
+    (user-error "Unsupported `rass` tool entry: %S" tool))))
+
+(defun eglot-python-preset--rass-tool-kind (command)
+  "Return the supported tool kind for COMMAND, or nil."
+  (eglot-python-preset--tool-kind-from-name (car command)))
+
+(defun eglot-python-preset--rass-json-string (object)
+  "Serialize OBJECT to JSON."
+  (decode-coding-string (json-serialize object) 'utf-8))
+
+(defun eglot-python-preset--rass-generated-dir ()
+  "Return the directory used for generated `rass` presets."
+  (expand-file-name "eglot-python-preset/" user-emacs-directory))
+
+(defun eglot-python-preset--library-dir ()
+  "Return directory containing the installed library."
+  (file-name-directory
+   (or load-file-name
+       byte-compile-current-file
+       (locate-library "eglot-python-preset")
+       default-directory)))
+
+(defun eglot-python-preset--path-in-directory-p (path dir)
+  "Return non-nil if PATH is inside DIR."
+  (when (and path dir)
+    (let ((path (file-truename path))
+          (dir (file-name-as-directory (file-truename dir))))
+      (string-prefix-p dir path))))
+
+(defvar eglot-python-preset--template-cache (make-hash-table :test 'equal)
+  "Cache for package template contents.")
+
+(defun eglot-python-preset--template-string (name)
+  "Return template NAME from the installed package."
+  (let* ((path (expand-file-name
+                name (expand-file-name
+                      "templates" (eglot-python-preset--library-dir))))
+         (attrs (file-attributes path))
+         (mtime (file-attribute-modification-time attrs))
+         (cached (gethash name eglot-python-preset--template-cache)))
+    (if (and cached
+             (equal (plist-get cached :path) path)
+             (equal (plist-get cached :mtime) mtime))
+        (plist-get cached :content)
+      (let ((content
+             (with-temp-buffer
+               (insert-file-contents path)
+               (buffer-string))))
+        (puthash name
+                 (list :content content :mtime mtime :path path)
+                 eglot-python-preset--template-cache)
+        content))))
+
+(defun eglot-python-preset--render-template (name replacements)
+  "Render template NAME using REPLACEMENTS.
+
+REPLACEMENTS is an alist mapping literal placeholder strings to values."
+  (let ((template (eglot-python-preset--template-string name)))
+    (dolist (replacement replacements template)
+      (setq template
+            (replace-regexp-in-string
+             (regexp-quote (car replacement))
+             (cdr replacement)
+             template
+             t t)))))
+
+(defun eglot-python-preset--rass-tool-label (tool)
+  "Return a stable filename label for `rass` TOOL."
+  (let* ((text (cond
+                ((symbolp tool)
+                 (symbol-name tool))
+                ((vectorp tool)
+                 (let* ((command (append tool nil))
+                        (program (file-name-sans-extension
+                                  (file-name-nondirectory (car command))))
+                        (base (if (string-empty-p program)
+                                  "tool"
+                                program)))
+                   (if (= (length command) 1)
+                       base
+                     (format "%s-argv-%s"
+                             base
+                             (substring (secure-hash 'sha256 (prin1-to-string tool))
+                                        0 12)))))
+                (t
+                 (user-error "Unsupported `rass` tool entry: %S" tool)))))
+    (string-trim
+     (replace-regexp-in-string
+      "-+"
+      "-"
+      (replace-regexp-in-string "[^[:alnum:]]+" "-" (downcase text)))
+     "-"
+     "-")))
+
+(defun eglot-python-preset--rass-shared-preset-path (tools)
+  "Return the stable shared preset path for TOOLS."
+  (let* ((labels (mapcar #'eglot-python-preset--rass-tool-label tools))
+         (slug (string-join labels "-"))
+         (hash (substring (secure-hash 'sha256 (prin1-to-string tools)) 0 12)))
+    (expand-file-name
+     (format "rass-preset-shared-%s-%s.py" slug hash)
+     (eglot-python-preset--rass-generated-dir))))
+
+(defun eglot-python-preset--rass-contextual-preset-path (hash-input)
+  "Return the contextual preset path for HASH-INPUT."
+  (expand-file-name
+   (format "rass-preset-contextual-%s.py"
+           (secure-hash 'sha256 hash-input))
+   (eglot-python-preset--rass-generated-dir)))
+
+(defun eglot-python-preset--rass-tool-spec (tool)
+  "Return metadata for `rass` TOOL."
+  (let* ((command (eglot-python-preset--rass-tool-command tool))
+         (kind (eglot-python-preset--rass-tool-kind command))
+         (program (car command)))
+    (list :tool tool
+          :command command
+          :kind kind
+          :local-venv-sensitive
+          (and kind
+               (stringp program)
+               (seq-some (lambda (dir)
+                           (eglot-python-preset--path-in-directory-p program dir))
+                         (eglot-python-preset--venv-bin-dirs))))))
+
+(defun eglot-python-preset--write-file-if-changed (path content)
+  "Write CONTENT to PATH only when it differs from the existing file."
+  (make-directory (file-name-directory path) t)
+  (unless (and (file-exists-p path)
+               (with-temp-buffer
+                 (insert-file-contents path)
+                 (string= (buffer-string) content)))
+    (with-temp-file path
+      (insert content))))
+
+(defun eglot-python-preset--cleanup-rass-contextual-presets (&optional preserve-path)
+  "Delete older contextual generated `rass` presets, preserving PRESERVE-PATH."
+  (when-let* (((integerp eglot-python-preset-rass-max-contextual-presets))
+              ((> eglot-python-preset-rass-max-contextual-presets 0))
+              (dir (eglot-python-preset--rass-generated-dir))
+              ((file-directory-p dir)))
+    (let ((files (directory-files dir t "^rass-preset-contextual-.*\\.py\\'")))
+      (setq files
+            (sort files
+                  (lambda (a b)
+                    (time-less-p
+                     (file-attribute-modification-time (file-attributes b))
+                     (file-attribute-modification-time (file-attributes a))))))
+      (when preserve-path
+        (setq files
+              (cons preserve-path
+                    (delete preserve-path files))))
+      (let ((overflow (nthcdr eglot-python-preset-rass-max-contextual-presets files)))
+        (dolist (file overflow)
+          (when (file-exists-p file)
+            (delete-file file)))))))
+
+(defun eglot-python-preset--write-rass-preset (path commands ty-config
+                                                    basedpyright-config)
+  "Write a generated `rass` preset to PATH.
+
+COMMANDS is the list of server commands.
+TY-CONFIG and BASEDPYRIGHT-CONFIG contain any extra per-server
+configuration to merge via `workspace/configuration'."
+  (eglot-python-preset--write-file-if-changed
+   path
+   (eglot-python-preset--render-template
+    "rass-preset.tpl.py"
+    `(("__SERVERS__"
+       . ,(eglot-python-preset--rass-json-string
+           (vconcat (mapcar #'vconcat commands))))
+      ("__TY_CONFIGURATION__"
+       . ,(if ty-config
+              (eglot-python-preset--rass-json-string ty-config)
+            "None"))
+      ("__BASEDPYRIGHT_CONFIGURATION__"
+       . ,(if basedpyright-config
+              (eglot-python-preset--rass-json-string basedpyright-config)
+            "None"))))))
+
+(defun eglot-python-preset--rass-preset-path ()
+  "Return the generated `rass` preset path for the current buffer context."
+  (let* ((tool-specs (mapcar #'eglot-python-preset--rass-tool-spec
+                             eglot-python-preset-rass-tools))
+         (commands (mapcar (lambda (tool-spec)
+                             (plist-get tool-spec :command))
+                           tool-specs))
+         (context (eglot-python-preset--pep-723-context))
+         (ty-config (when (and context
+                               (seq-some (lambda (command)
+                                           (eq (eglot-python-preset--rass-tool-kind command)
+                                               'ty))
+                                         commands))
+                      (eglot-python-preset--ty-configuration context)))
+         (basedpyright-config
+          (when (and context
+                     (seq-some (lambda (command)
+                                 (eq (eglot-python-preset--rass-tool-kind command)
+                                     'basedpyright))
+                               commands))
+            (eglot-python-preset--basedpyright-python-configuration context)))
+         (contextual-p (or ty-config
+                           basedpyright-config
+                           (seq-some (lambda (tool-spec)
+                                       (plist-get tool-spec :local-venv-sensitive))
+                                     tool-specs)))
+         (path (if contextual-p
+                   (eglot-python-preset--rass-contextual-preset-path
+                    (mapconcat #'identity
+                               (delq nil
+                                     (list
+                                      (eglot-python-preset--rass-json-string
+                                       (vconcat (mapcar #'vconcat commands)))
+                                      (when ty-config
+                                        (eglot-python-preset--rass-json-string
+                                         ty-config))
+                                      (when basedpyright-config
+                                        (eglot-python-preset--rass-json-string
+                                         basedpyright-config))))
+                               "\0"))
+                 (eglot-python-preset--rass-shared-preset-path
+                  eglot-python-preset-rass-tools))))
+    (eglot-python-preset--write-rass-preset
+     path commands ty-config basedpyright-config)
+    (when contextual-p
+      (eglot-python-preset--cleanup-rass-contextual-presets path))
+    path))
+
 (defun eglot-python-preset--merge-plists (base override)
   "Recursively merge OVERRIDE plist into BASE plist.
 
@@ -230,28 +559,23 @@ since PATH is typically a directory (project root) or nil."
 For PEP-723 scripts, includes environment configuration.
 Only used for ty; basedpyright uses workspace configuration instead."
   (when (eq eglot-python-preset-lsp-server 'ty)
-    (when-let* ((file (buffer-file-name))
-                ((eglot-python-preset-has-metadata-p))
-                (script-dir (file-name-directory file))
-                (python-path (eglot-python-preset-get-python-path file)))
-      (let ((env-dir (or (eglot-python-preset--python-env-dir python-path)
-                         python-path)))
-        `(:configuration
-          (:environment
-           (:python ,env-dir
-            :root [,script-dir])))))))
+    (eglot-python-preset--ty-configuration)))
 
 (defun eglot-python-preset--server-contact (_interactive)
   "Return the server contact spec for Python LSP.
 
 Includes initializationOptions for ty with PEP-723 scripts."
   (let ((command (pcase eglot-python-preset-lsp-server
-                   ('ty (list (eglot-python-preset--resolve-executable "ty")
-                              "server"))
                    ('basedpyright
                     (list (eglot-python-preset--resolve-executable
                            "basedpyright-langserver")
-                          "--stdio"))))
+                          "--stdio"))
+                   ('rass
+                    (list (eglot-python-preset--resolve-executable
+                           eglot-python-preset-rass-program)
+                          (eglot-python-preset--rass-preset-path)))
+                   ('ty (list (eglot-python-preset--resolve-executable "ty")
+                              "server"))))
         (init-options (eglot-python-preset--init-options)))
     (if init-options
         `(,@command :initializationOptions ,init-options)
@@ -265,7 +589,7 @@ Includes initializationOptions for ty with PEP-723 scripts."
       (derived-mode-p 'markdown-mode))))
 
 (defun eglot-python-preset--python-project-root-p (dir)
-  "Return non-nil if DIR contains a Python project marker file."
+  "Return non-nil if DIR has a Python project marker file."
   (seq-some (lambda (file)
               (file-exists-p (expand-file-name file dir)))
             eglot-python-preset-python-project-markers))

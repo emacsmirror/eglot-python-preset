@@ -25,7 +25,57 @@ Run tests with:
 bun run test
 ```
 
-This executes the test suite found in `test/pep-723/test.el`.
+This executes the default ERT suite found in `test/test.el`.
+
+Run live smoke tests with:
+
+```sh
+bun run test:live
+```
+
+This enables the opt-in `rass` integration coverage in the same test file. It
+is slower than `bun run test`, so do not run it by default after every edit.
+
+Good times to run `bun run test:live`:
+
+- After changing LSP startup or server-contact generation in
+  `eglot-python-preset.el`
+- After changing generated `rass` preset behavior, tool argv handling, or local
+  executable resolution
+- After changing PEP-723 environment detection, `uv sync --script` flows, or
+  workspace-configuration merging for `ty` or `basedpyright`
+- After changing the live harness itself under `test/`
+- Before handing off a change that affects real `rass` integration behavior
+
+Usually `bun run test` plus `bun run check` is enough for docs-only changes,
+README edits, or purely static test refactors.
+
+### Packaging checks
+
+Run the MELPA-oriented checks with:
+
+```sh
+bun run check:melpa
+```
+
+This runs:
+
+- `bun run check`
+- `bun run check:doc`
+- `bun run check:package-lint`
+- `bun run check:melpa:install`
+
+If you only need one part of that checklist, you can run the sub-commands
+directly.
+
+The local source of truth for the MELPA recipe is `eglot-python-preset.recipe`
+at the repository root. The local install check and Melpazoid workflow both
+read from that file.
+
+`bun run check:melpa:install` performs a local `package-build` build/install
+using a temporary snapshot repository outside the working tree. Keep that temp
+root outside this repo because `package-build` may run destructive cleanup in
+its own clone/build area.
 
 ### Checking for byte-compile warnings
 

@@ -7,10 +7,11 @@ Configures Python LSP support for Emacs using
 [PEP-723](https://peps.python.org/pep-0723/) script metadata and automatic
 project detection.
 
-This package configures Eglot to work with Python files using either
-[ty](https://github.com/astral-sh/ty) or
-[basedpyright](https://github.com/DetachHead/basedpyright) as the language
-server. It automatically handles environment synchronization for
+This package configures Eglot to work with Python files using
+[ty](https://github.com/astral-sh/ty),
+[basedpyright](https://github.com/DetachHead/basedpyright), or
+[rassumfrassum](https://github.com/joaotavora/rassumfrassum) as the language
+server frontend. It automatically handles environment synchronization for
 [uv](https://github.com/astral-sh/uv)-managed scripts with inline dependencies.
 
 ## Prerequisites
@@ -23,6 +24,8 @@ server. It automatically handles environment synchronization for
   - [basedpyright](https://github.com/DetachHead/basedpyright) - fork of pyright
     with additional features. It can be installed globally or in a project-root
     `.venv`.
+  - [rassumfrassum](https://github.com/joaotavora/rassumfrassum) - optional
+    stdio multiplexer for combining multiple Python tools.
 
 ## Installation
 
@@ -36,7 +39,7 @@ will automatically start the LSP server using Eglot.
   :ensure t
   :after eglot
   :custom
-  (eglot-python-preset-lsp-server 'ty) ; or 'basedpyright
+  (eglot-python-preset-lsp-server 'ty) ; or 'basedpyright or 'rass
   :config
   (eglot-python-preset-setup))
 ```
@@ -53,7 +56,7 @@ git clone https://github.com/mwolson/eglot-python-preset ~/devel/eglot-python-pr
 ```elisp
 (add-to-list 'load-path (expand-file-name "~/devel/eglot-python-preset"))
 (require 'eglot-python-preset)
-(setopt eglot-python-preset-lsp-server 'ty) ; or 'basedpyright
+(setopt eglot-python-preset-lsp-server 'ty) ; or 'basedpyright or 'rass
 (eglot-python-preset-setup)
 ```
 
@@ -114,6 +117,34 @@ Choose which language server to use:
 (setopt eglot-python-preset-lsp-server 'ty)         ; default
 ;; or
 (setopt eglot-python-preset-lsp-server 'basedpyright)
+;; or
+(setopt eglot-python-preset-lsp-server 'rass)
+```
+
+### `eglot-python-preset-rass-tools`
+
+When using the `rass` backend, this list controls the generated preset.
+Supported symbolic tools get local `.venv` executable resolution and special
+handling for PEP-723 where available.
+
+Literal commands in a vector are passed through to `rass`:
+
+```elisp
+(setopt eglot-python-preset-rass-tools
+        '(ty
+          ruff
+          ["custom-lsp" "--stdio"]))
+```
+
+If you want to pass arguments to a built-in tool, spell that entry out as a
+literal vector. For example, Ruff supports top-level `--isolated` before the
+`server` subcommand, which can be useful when you want to ignore ambient Ruff
+configuration files:
+
+```elisp
+(setopt eglot-python-preset-rass-tools
+        '(ty
+          ["ruff" "--isolated" "server"]))
 ```
 
 ### `eglot-python-preset-python-project-markers`
@@ -123,6 +154,17 @@ Files that indicate a Python project root:
 ```elisp
 (setopt eglot-python-preset-python-project-markers
         '("pyproject.toml" "requirements.txt"))  ; default
+```
+
+### `eglot-python-preset-rass-max-contextual-presets`
+
+Contextual `rass` presets are the ones that embed per-script or project-local
+state, such as PEP-723 Ty configuration or a project-local `.venv` executable
+path. Older contextual presets are pruned automatically to keep the generated
+directory from growing without bound:
+
+```elisp
+(setopt eglot-python-preset-rass-max-contextual-presets 50) ; default
 ```
 
 ### Workspace Configuration (basedpyright)
@@ -164,6 +206,10 @@ Example to disable auto-import completions and set type checking mode:
 - If `ty` or `basedpyright-langserver` is installed only in a project-local
   `.venv`, make sure you are using v0.3.0 or later so this package can prefer
   that executable automatically.
+- If you use the `rass` backend, the package generates a preset under your
+  Emacs directory and updates it as needed. Context-free presets are reused
+  across buffers, while PEP-723 and project-local `.venv` cases keep separate
+  generated files when the preset content depends on that local context.
 
 ## Notes
 
@@ -171,7 +217,8 @@ Example to disable auto-import completions and set type checking mode:
   installed and in your PATH.
 - For standard Python projects, the package prefers `ty` or
   `basedpyright-langserver` from a project-root `.venv` and otherwise falls back
-  to PATH.
+  to PATH. The same resolution is used for supported tools in generated `rass`
+  presets.
 - For PEP-723 scripts, environments are cached by `uv` and shared across
   sessions.
 - If you see a warning about the environment not being synced, run

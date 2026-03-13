@@ -22,6 +22,16 @@ function get_topdir() {
 
 export _TOPDIR="$(get_topdir)"
 
+function get_parent_tmpdir() {
+    local topdir
+    topdir="$(get_topdir)"
+    echo "$(dirname "$topdir")/tmp/$(basename "$topdir")"
+}
+
+function get_melpa_recipe_file() {
+    echo "$(get_topdir)/eglot-python-preset.recipe"
+}
+
 function emacs_script() {
     emacs --script "$@" 2>&1 | grep -v '^Loading '
 }

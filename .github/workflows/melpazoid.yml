@@ -30,8 +30,10 @@ jobs:
       - name: Test
         run: bun run test
       - name: Run Melpazoid
-        env:
-          LOCAL_REPO: ${{ github.workspace }}
-          RECIPE: (eglot-python-preset :fetcher github :repo "mwolson/eglot-python-preset")
-          EXIST_OK: true
-        run: echo $GITHUB_REF && make -C ~/melpazoid
+        run: |
+          RECIPE="$(tr '\n' ' ' < eglot-python-preset.recipe)"
+          export LOCAL_REPO="${{ github.workspace }}"
+          export RECIPE
+          export EXIST_OK=true
+          echo "$GITHUB_REF"
+          make -C ~/melpazoid
