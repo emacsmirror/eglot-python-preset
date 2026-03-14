@@ -238,10 +238,11 @@ prompting:
      (eglot-python-preset-rass-tools . (ty ruff)))))
 ```
 
-`eglot-python-preset-lsp-server` accepts `ty`, `basedpyright`, or `rass`.
-`eglot-python-preset-rass-tools` accepts lists of known tool symbols (`ty`,
-`ruff`, `basedpyright`). `eglot-python-preset-python-project-markers` accepts
-lists of filename strings.
+- `eglot-python-preset-lsp-server` accepts `ty`, `basedpyright`, or `rass`.
+- `eglot-python-preset-rass-tools` accepts lists of known tool symbols (`ty`,
+  `ruff`, `basedpyright`).
+- `eglot-python-preset-python-project-markers` accepts lists of filename
+  strings.
 
 #### Using `dir-locals-set-directory-class` (init file, no project changes)
 
