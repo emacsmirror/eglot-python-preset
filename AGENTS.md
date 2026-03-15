@@ -19,7 +19,7 @@ formatter integrations.
 
 ### Running tests
 
-Run tests with:
+Run unit tests with:
 
 ```sh
 bun run test
@@ -33,8 +33,21 @@ Run live smoke tests with:
 bun run test:live
 ```
 
-This enables the opt-in `rass` integration coverage in the same test file. It is
-slower than `bun run test`, so do not run it by default after every edit.
+This runs live `rass` integration tests in parallel (6 concurrent Emacs
+processes by default, configurable via `LIVE_TEST_JOBS` env var). It is slower
+than `bun run test`, so do not run it by default after every edit.
+
+Run both unit and live tests together with:
+
+```sh
+bun run test:all
+```
+
+For debugging a single live test failure, use the sequential runner:
+
+```sh
+bun run test:live:sequential
+```
 
 Good times to run `bun run test:live`:
 

@@ -185,12 +185,14 @@ If TARGET-NAME is non-nil, rename the file."
   my-test-run-live-tests)
 
 (defun my-test--run-rass-session (preset-path file-specs root-dir
-                                              &optional timeout)
+                                              &optional timeout min-events)
   "Run rass-live-client with multiple files and return parsed result.
 PRESET-PATH is the rass preset.  FILE-SPECS is a list of
 \(FILE-PATH . LANGUAGE-ID) cons cells.  ROOT-DIR is the workspace
-root.  TIMEOUT defaults to 8 seconds."
+root.  TIMEOUT defaults to 8 seconds.  MIN-EVENTS is the minimum
+publishDiagnostics events per file before settle starts (default 1)."
   (let* ((timeout (or timeout 8))
+         (min-events (or min-events 1))
          (file-args (mapconcat
                      (lambda (spec)
                        (format "%s:%s"
@@ -198,12 +200,14 @@ root.  TIMEOUT defaults to 8 seconds."
                                (shell-quote-argument (cdr spec))))
                      file-specs " "))
          (output (shell-command-to-string
-                  (format "python3 %s %s %s --root %s --timeout %s"
-                          (shell-quote-argument my-test-live-rass-client)
-                          (shell-quote-argument preset-path)
-                          file-args
-                          (shell-quote-argument root-dir)
-                          timeout))))
+                  (format
+                   "python3 %s %s %s --root %s --timeout %s --min-events %s"
+                   (shell-quote-argument my-test-live-rass-client)
+                   (shell-quote-argument preset-path)
+                   file-args
+                   (shell-quote-argument root-dir)
+                   timeout
+                   min-events))))
     (json-parse-string output :object-type 'alist)))
 
 (defun my-test--session-file-result (session-result file-path)
@@ -1170,5 +1174,70 @@ the Python project boundary."
          result unresolved
          '("reportMissingModuleSource" "reportUnusedImport") '("basedpyright"))
         (my-test--assert-file-diagnostics result valid '())))))
+
+(defun my-test-run-live-tests-parallel ()
+  "Run all live tests in parallel child Emacs processes, then exit.
+Parallelism defaults to 6 or the LIVE_TEST_JOBS env variable."
+  (let* ((max-jobs (string-to-number (or (getenv "LIVE_TEST_JOBS") "6")))
+         (project-dir (expand-file-name ".." my-test-test-dir))
+         (test-names
+          (with-temp-buffer
+            (insert-file-contents
+             (expand-file-name "test/test.el" project-dir))
+            (let (names)
+              (while (re-search-forward
+                      "ert-deftest \\(eglot-python-preset-rass-live-[^ ()]+\\)"
+                      nil t)
+                (push (match-string 1) names))
+              (nreverse names))))
+         (total (length test-names))
+         (emacs-bin (expand-file-name invocation-name invocation-directory))
+         (preset-el (expand-file-name
+                     "eglot-python-preset.el" project-dir))
+         (test-el (expand-file-name "test/test.el" project-dir))
+         (running '())
+         (passed 0)
+         (failed 0)
+         (failures '()))
+    (message "Running %d live tests with up to %d parallel jobs..."
+             total max-jobs)
+    (while (or test-names running)
+      ;; Launch jobs up to max-jobs
+      (while (and test-names (< (length running) max-jobs))
+        (let* ((name (pop test-names))
+               (buf (generate-new-buffer (concat " *live-test:" name "*")))
+               (proc (start-process
+                      name buf emacs-bin
+                      "-Q" "--batch"
+                      "-l" preset-el
+                      "--eval" "(setq my-test-run-live-tests t)"
+                      "-l" test-el
+                      "--eval"
+                      (format "(ert-run-tests-batch-and-exit \"^%s$\")" name))))
+          (set-process-sentinel proc #'ignore)
+          (push (list name proc buf) running)))
+      ;; Poll for completion
+      (sleep-for 0.1)
+      (let (still-running)
+        (dolist (entry running)
+          (cl-destructuring-bind (name proc buf) entry
+            (if (process-live-p proc)
+                (push entry still-running)
+              (let ((rc (process-exit-status proc))
+                    (output (with-current-buffer buf (buffer-string))))
+                (if (= rc 0)
+                    (progn
+                      (cl-incf passed)
+                      (message "PASS: %s" name))
+                  (cl-incf failed)
+                  (push name failures)
+                  (message "FAIL: %s" name)
+                  (message "%s" (car (last (split-string output "\n\n")))))
+                (kill-buffer buf)))))
+        (setq running (nreverse still-running))))
+    (message "\n%d/%d live tests passed." passed total)
+    (when failures
+      (message "Failures: %s" (string-join (nreverse failures) ", ")))
+    (kill-emacs (if (= failed 0) 0 1))))
 
 ;;; test/test.el ends here

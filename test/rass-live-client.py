@@ -83,6 +83,19 @@ def main():
     parser.add_argument("--server", default="rass")
     parser.add_argument("--root", default=None)
     parser.add_argument("--timeout", type=float, default=8.0)
+    parser.add_argument(
+        "--settle",
+        type=float,
+        default=1.5,
+        help="seconds with no diagnostic events before exiting",
+    )
+    parser.add_argument(
+        "--min-events",
+        type=int,
+        default=1,
+        dest="min_events",
+        help="minimum publishDiagnostics events per file before settle starts",
+    )
     parser.add_argument("--stderr", action="store_true")
     args = parser.parse_args()
 
@@ -99,9 +112,14 @@ def main():
     next_id = 1
     workspace_sections = []
     per_file = {}
+    files_with_diags = set()
+    diag_event_count = {}
+    all_file_uris = set()
     for file_path, _ in files:
         uri = file_path.as_uri()
         per_file[uri] = {"diagnosticSources": [], "diagnosticCodes": []}
+        diag_event_count[uri] = 0
+        all_file_uris.add(uri)
     initialized = False
     message_queue, reader_thread = start_message_reader(proc)
 
@@ -130,27 +148,39 @@ def main():
         )
 
         deadline = time.monotonic() + args.timeout
-        last_message_at = time.monotonic()
-        saw_diagnostics = False
         files_opened = False
+        stable_since = None
 
         while time.monotonic() < deadline:
             if proc.poll() is not None:
                 break
 
+            if initialized and files_opened:
+                poll_interval = 0.1
+            else:
+                poll_interval = max(0.0, deadline - time.monotonic())
             message = wait_for_message(
-                message_queue, max(0.0, deadline - time.monotonic())
+                message_queue,
+                min(poll_interval, max(0.0, deadline - time.monotonic())),
             )
             if message is None:
-                if initialized and files_opened:
-                    idle = time.monotonic() - last_message_at
-                    if saw_diagnostics and idle > 0.2:
+                if (
+                    initialized
+                    and files_opened
+                    and files_with_diags >= all_file_uris
+                    and stable_since is not None
+                ):
+                    idle = time.monotonic() - stable_since
+                    events_met = all(
+                        diag_event_count[u] >= args.min_events
+                        for u in all_file_uris
+                    )
+                    if events_met and idle > args.settle:
                         break
-                    if idle > 0.5:
+                    if idle > args.settle * 2:
                         break
                 continue
 
-            last_message_at = time.monotonic()
             method = message.get("method")
 
             if "id" in message and message.get("id") == 1 and "result" in message:
@@ -195,10 +225,11 @@ def main():
                 "textDocument/publishDiagnostics",
                 "$/streamDiagnostics",
             ):
-                saw_diagnostics = True
                 diag_uri = message.get("params", {}).get("uri", "")
                 entry = per_file.get(diag_uri)
                 if entry is not None:
+                    files_with_diags.add(diag_uri)
+                    diag_event_count[diag_uri] += 1
                     for diagnostic in message.get("params", {}).get(
                         "diagnostics", []
                     ):
@@ -208,6 +239,7 @@ def main():
                             entry["diagnosticSources"].append(str(source))
                         if code is not None:
                             entry["diagnosticCodes"].append(str(code))
+                    stable_since = time.monotonic()
                 continue
 
         try:

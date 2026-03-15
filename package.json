@@ -22,7 +22,9 @@
     "hooks:pre-commit": "lefthook run pre-commit",
     "hooks:pre-commit:all": "lefthook run pre-commit --all-files",
     "test": "emacs -Q --batch -l eglot-python-preset.el -l test/test.el -f ert-run-tests-batch-and-exit",
-    "test:live": "emacs -Q --batch -l eglot-python-preset.el -l test/test.el --eval \"(setq my-test-run-live-tests t)\" -f ert-run-tests-batch-and-exit",
+    "test:all": "bun run test && bun run test:live",
+    "test:live": "emacs -Q --batch -l eglot-python-preset.el -l test/test.el -f my-test-run-live-tests-parallel",
+    "test:live:sequential": "emacs -Q --batch -l eglot-python-preset.el -l test/test.el --eval \"(setq my-test-run-live-tests t)\" -f ert-run-tests-batch-and-exit",
     "up": "mise use -g bun@latest && mise install && bun install && uv sync"
   },
   "dependencies": {},
