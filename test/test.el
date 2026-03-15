@@ -538,7 +538,7 @@ If TARGET-NAME is non-nil, rename the file."
                (list ty-path
                      "\"configuration\""
                      "\"python\":\"/tmp/rass-ty/\""
-                     "BASEDPYRIGHT_CONFIGURATION = None")))))
+                     "BASEDPYRIGHT_CONFIGURATION: dict[str, Any] | None = None")))))
       (delete-directory project-dir t))))
 
 (ert-deftest eglot-python-preset-rass-default-tools-include-ty-init-config ()
@@ -665,7 +665,7 @@ If TARGET-NAME is non-nil, rename the file."
                preset-path
                (list langserver-path
                      "\"pythonPath\":\"/tmp/rass-bp/bin/python3\""
-                     "TY_CONFIGURATION = None")))))
+                     "TY_CONFIGURATION: dict[str, Any] | None = None")))))
       (delete-directory project-dir t))))
 
 (ert-deftest eglot-python-preset-rass-preserves-basedpyright-and-ruff-config ()
@@ -690,7 +690,7 @@ If TARGET-NAME is non-nil, rename the file."
                (list langserver-path
                      ruff-path
                      "\"pythonPath\":\"/tmp/rass-bp-ruff/bin/python3\""
-                     "TY_CONFIGURATION = None")))))
+                     "TY_CONFIGURATION: dict[str, Any] | None = None")))))
       (delete-directory project-dir t))))
 
 (ert-deftest eglot-python-preset-rass-template-helper-unit-checks-pass ()

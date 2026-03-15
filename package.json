@@ -23,7 +23,7 @@
     "hooks:pre-commit:all": "lefthook run pre-commit --all-files",
     "test": "emacs -Q --batch -l eglot-python-preset.el -l test/test.el -f ert-run-tests-batch-and-exit",
     "test:live": "emacs -Q --batch -l eglot-python-preset.el -l test/test.el --eval \"(setq my-test-run-live-tests t)\" -f ert-run-tests-batch-and-exit",
-    "up": "mise use -g bun@latest && mise install && bun install"
+    "up": "mise use -g bun@latest && mise install && bun install && uv sync"
   },
   "dependencies": {},
   "devDependencies": {

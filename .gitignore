@@ -16,6 +16,9 @@ dist/
 # Backup files
 *~
 
+# Python
+.venv/
+
 # Temp files
 tmp/
 

@@ -6,9 +6,9 @@ from rassumfrassum.frassum import LspLogic, Server
 from rassumfrassum.json import JSON
 from rassumfrassum.util import dmerge
 
-SERVERS = __SERVERS__
-TY_CONFIGURATION = __TY_CONFIGURATION__
-BASEDPYRIGHT_CONFIGURATION = __BASEDPYRIGHT_CONFIGURATION__
+SERVERS: list[list[str]] = __SERVERS__  # type: ignore[name-defined]
+TY_CONFIGURATION: dict[str, Any] | None = __TY_CONFIGURATION__  # type: ignore[name-defined]
+BASEDPYRIGHT_CONFIGURATION: dict[str, Any] | None = __BASEDPYRIGHT_CONFIGURATION__  # type: ignore[name-defined]
 
 
 def _server_kind(name: str) -> str | None:
