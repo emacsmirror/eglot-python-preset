@@ -847,9 +847,10 @@ Configures `eglot-server-programs' based on `eglot-python-preset-lsp-server'."
     (when eglot-python-preset-auto-setup
       (require 'eglot-python-preset nil t)
       (eglot-python-preset-setup)))
-  (if after-init-time
+  (if (and after-init-time (not noninteractive))
       (eglot-python-preset--maybe-setup)
-    (add-hook 'after-init-hook #'eglot-python-preset--maybe-setup t)))
+    (unless noninteractive
+      (add-hook 'after-init-hook #'eglot-python-preset--maybe-setup t))))
 
 (provide 'eglot-python-preset)
 ;;; eglot-python-preset.el ends here
