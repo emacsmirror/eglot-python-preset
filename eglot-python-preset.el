@@ -2,7 +2,7 @@
 
 ;; Copyright (C) 2025-2026 Michael Olson <mwolson@gnu.org>
 
-;; Version: 0.5.1
+;; Version: 0.5.2
 ;; Author: Michael Olson <mwolson@gnu.org>
 ;; Maintainer: Michael Olson <mwolson@gnu.org>
 ;; URL: https://github.com/mwolson/eglot-python-preset
