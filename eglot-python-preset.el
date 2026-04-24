@@ -29,13 +29,13 @@
 
 ;; This package provides a preset for Eglot to work with Python files,
 ;; including support for PEP-723 script metadata and project detection.
-;; It configures the LSP server (ty or basedpyright) and handles environment
-;; synchronization for uv-managed scripts.
+;; It configures the LSP server (ty, basedpyright, or pyrefly) and handles
+;; environment synchronization for uv-managed scripts.
 
 ;; Prerequisites:
 ;;
 ;; - Install uv
-;; - Install ty (>= v0.0.8) or basedpyright as a Python language server
+;; - Install ty (>= v0.0.8), basedpyright, or pyrefly as a Python language server
 ;; - Download this file and add it to the load path
 
 ;; Quick start (package-vc):
@@ -43,7 +43,7 @@
 ;;   (use-package eglot-python-preset
 ;;     :vc (:url "https://github.com/mwolson/eglot-python-preset")
 ;;     :custom
-;;     (eglot-python-preset-lsp-server 'ty)) ; or 'basedpyright or 'rass
+;;     (eglot-python-preset-lsp-server 'ty)) ; or 'basedpyright, 'pyrefly, or 'rass
 ;;
 ;; After that, opening Python files will automatically start the LSP server using
 ;; Eglot and handle PEP-723 magic tags within files.
@@ -98,7 +98,21 @@ package is loaded to suppress automatic setup and call
   "LSP server to use for Python files."
   :type '(choice (const :tag "ty" ty)
                  (const :tag "basedpyright" basedpyright)
+                 (const :tag "pyrefly" pyrefly)
                  (const :tag "rass" rass))
+  :group 'eglot-python-preset)
+
+;;;###autoload
+(defcustom eglot-python-preset-pyrefly-display-type-errors 'default
+  "How Pyrefly displays type-check diagnostics in the IDE.
+
+The value maps to Pyrefly's `pyrefly.displayTypeErrors' initialization
+option.  `default' follows Pyrefly's normal behavior, which only displays
+type errors when a Pyrefly configuration covers the file."
+  :type '(choice (const :tag "Default" default)
+                 (const :tag "Force on" force-on)
+                 (const :tag "Force off" force-off)
+                 (const :tag "Error missing imports" error-missing-imports))
   :group 'eglot-python-preset)
 
 ;;;###autoload
@@ -148,6 +162,7 @@ any supported special handling."
   :type '(repeat
           (choice
            (const :tag "basedpyright" basedpyright)
+           (const :tag "pyrefly" pyrefly)
            (const :tag "ruff" ruff)
            (const :tag "ty" ty)
            (restricted-sexp
@@ -172,17 +187,25 @@ any supported special handling."
 
 (defun eglot-python-preset--lsp-server-safe-p (value)
   "Return non-nil if VALUE is a safe `eglot-python-preset-lsp-server' value."
-  (memq value '(ty basedpyright rass)))
+  (memq value '(ty basedpyright pyrefly rass)))
 
 (put 'eglot-python-preset-lsp-server 'safe-local-variable
      #'eglot-python-preset--lsp-server-safe-p)
+
+(defun eglot-python-preset--pyrefly-display-type-errors-safe-p (value)
+  "Return non-nil if VALUE is safe for Pyrefly display type errors."
+  (memq value '(default force-on force-off error-missing-imports)))
+
+(put 'eglot-python-preset-pyrefly-display-type-errors 'safe-local-variable
+     #'eglot-python-preset--pyrefly-display-type-errors-safe-p)
 
 (defun eglot-python-preset--rass-tools-safe-p (value)
   "Return non-nil if VALUE is a safe `eglot-python-preset-rass-tools' value.
 Only lists of known symbols are considered safe.  Literal command vectors
 are excluded because they could execute arbitrary programs."
   (and (listp value)
-       (seq-every-p (lambda (item) (memq item '(basedpyright ruff ty))) value)))
+       (seq-every-p (lambda (item) (memq item '(basedpyright pyrefly ruff ty)))
+                    value)))
 
 (put 'eglot-python-preset-rass-tools 'safe-local-variable
      #'eglot-python-preset--rass-tools-safe-p)
@@ -332,6 +355,29 @@ directory so that local .venv resolution still works."
               (python-path (plist-get context :python-path)))
     `(:pythonPath ,python-path)))
 
+(defun eglot-python-preset--pyrefly-display-type-errors-string ()
+  "Return Pyrefly display type errors setting as a string."
+  (pcase eglot-python-preset-pyrefly-display-type-errors
+    ('default "default")
+    ('force-on "force-on")
+    ('force-off "force-off")
+    ('error-missing-imports "error-missing-imports")))
+
+(defun eglot-python-preset--pyrefly-configuration (&optional context)
+  "Return Pyrefly initialization options for CONTEXT."
+  (let* ((context (or context (eglot-python-preset--pep-723-context)))
+         (python-path (plist-get context :python-path))
+         (display-errors (eglot-python-preset--pyrefly-display-type-errors-string))
+         (config nil))
+    (when python-path
+      (setq config (plist-put config :pythonPath python-path)))
+    (unless (eq eglot-python-preset-pyrefly-display-type-errors 'default)
+      (setq config
+            (eglot-python-preset--merge-plists
+             config
+             `(:pyrefly (:displayTypeErrors ,display-errors)))))
+    config))
+
 (defun eglot-python-preset--tool-kind-from-name (name)
   "Return the known tool kind for executable NAME, or nil."
   (when name
@@ -340,6 +386,8 @@ directory so that local .venv resolution still works."
       (cond
        ((member base '("basedpyright" "basedpyright-langserver"))
         'basedpyright)
+       ((string= base "pyrefly")
+        'pyrefly)
        ((string= base "ruff")
         'ruff)
        ((string= base "ty")
@@ -351,6 +399,9 @@ directory so that local .venv resolution still works."
    ((eq tool 'basedpyright)
     (list (eglot-python-preset--resolve-executable "basedpyright-langserver")
           "--stdio"))
+   ((eq tool 'pyrefly)
+    (list (eglot-python-preset--resolve-executable "pyrefly")
+          "lsp"))
    ((eq tool 'ruff)
     (list (eglot-python-preset--resolve-executable "ruff")
           "server"))
@@ -522,12 +573,13 @@ REPLACEMENTS is an alist mapping literal placeholder strings to values."
             (delete-file file)))))))
 
 (defun eglot-python-preset--write-rass-preset (path commands ty-config
-                                                    basedpyright-config)
+                                                    basedpyright-config
+                                                    pyrefly-config)
   "Write a generated `rass` preset to PATH.
 
 COMMANDS is the list of server commands.
-TY-CONFIG and BASEDPYRIGHT-CONFIG contain any extra per-server
-configuration to merge via `workspace/configuration'."
+TY-CONFIG, BASEDPYRIGHT-CONFIG, and PYREFLY-CONFIG contain any extra
+per-server configuration to send to the relevant language server."
   (eglot-python-preset--write-file-if-changed
    path
    (eglot-python-preset--render-template
@@ -542,6 +594,10 @@ configuration to merge via `workspace/configuration'."
       ("__BASEDPYRIGHT_CONFIGURATION__"
        . ,(if basedpyright-config
               (eglot-python-preset--rass-json-string basedpyright-config)
+            "None"))
+      ("__PYREFLY_CONFIGURATION__"
+       . ,(if pyrefly-config
+              (eglot-python-preset--rass-json-string pyrefly-config)
             "None"))))))
 
 (defun eglot-python-preset--rass-preset-path ()
@@ -565,8 +621,18 @@ configuration to merge via `workspace/configuration'."
                                      'basedpyright))
                                commands))
             (eglot-python-preset--basedpyright-python-configuration context)))
+         (pyrefly-config
+          (when (or context
+                    (not (eq eglot-python-preset-pyrefly-display-type-errors
+                             'default)))
+            (when (seq-some (lambda (command)
+                              (eq (eglot-python-preset--rass-tool-kind command)
+                                  'pyrefly))
+                            commands)
+              (eglot-python-preset--pyrefly-configuration context))))
          (contextual-p (or ty-config
                            basedpyright-config
+                           pyrefly-config
                            (seq-some (lambda (tool-spec)
                                        (plist-get tool-spec :local-venv-sensitive))
                                      tool-specs)))
@@ -582,12 +648,15 @@ configuration to merge via `workspace/configuration'."
                                          ty-config))
                                       (when basedpyright-config
                                         (eglot-python-preset--rass-json-string
-                                         basedpyright-config))))
+                                         basedpyright-config))
+                                      (when pyrefly-config
+                                        (eglot-python-preset--rass-json-string
+                                         pyrefly-config))))
                                "\0"))
                  (eglot-python-preset--rass-shared-preset-path
                   eglot-python-preset-rass-tools))))
     (eglot-python-preset--write-rass-preset
-     path commands ty-config basedpyright-config)
+     path commands ty-config basedpyright-config pyrefly-config)
     (when contextual-p
       (eglot-python-preset--cleanup-rass-contextual-presets path))
     path))
@@ -631,12 +700,13 @@ since PATH is typically a directory (project root) or nil."
       base-config)))
 
 (defun eglot-python-preset--init-options ()
-  "Return initializationOptions for ty LSP server.
+  "Return initializationOptions for LSP servers that need them.
 
 For PEP-723 scripts, includes environment configuration.
-Only used for ty; basedpyright uses workspace configuration instead."
-  (when (eq eglot-python-preset-lsp-server 'ty)
-    (eglot-python-preset--ty-configuration)))
+Basedpyright uses workspace configuration instead."
+  (pcase eglot-python-preset-lsp-server
+    ('pyrefly (eglot-python-preset--pyrefly-configuration))
+    ('ty (eglot-python-preset--ty-configuration))))
 
 (defun eglot-python-preset--server-contact (_interactive)
   "Return the server contact spec for Python LSP.
@@ -647,6 +717,9 @@ Includes initializationOptions for ty with PEP-723 scripts."
                     (list (eglot-python-preset--resolve-executable
                            "basedpyright-langserver")
                           "--stdio"))
+                   ('pyrefly
+                    (list (eglot-python-preset--resolve-executable "pyrefly")
+                          "lsp"))
                    ('rass
                     (if eglot-python-preset-rass-command
                         (append eglot-python-preset-rass-command nil)

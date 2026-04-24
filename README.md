@@ -10,7 +10,8 @@ project detection.
 
 This package configures Eglot to work with Python files using
 [ty](https://github.com/astral-sh/ty),
-[basedpyright](https://github.com/DetachHead/basedpyright), or
+[basedpyright](https://github.com/DetachHead/basedpyright),
+[pyrefly](https://pyrefly.org/), or
 [rassumfrassum](https://github.com/joaotavora/rassumfrassum) as the language
 server frontend. It automatically handles environment synchronization for
 [uv](https://github.com/astral-sh/uv)-managed scripts with inline dependencies.
@@ -32,9 +33,9 @@ for TypeScript, JavaScript, CSS, Astro, Vue, and Svelte support.
   Python buffers, without interfering with other languages.
 - You want project-local `.venv/bin` executables to be preferred automatically,
   with a fallback to globally installed tools.
-- You want to combine tools like ty or basedpyright with ruff through a single
-  Eglot connection via `rass`, without writing presets by hand or using the
-  existing rass presets.
+- You want to combine tools like ty, basedpyright, or pyrefly with ruff through
+  a single Eglot connection via `rass`, without writing presets by hand or using
+  the existing rass presets.
 - You work in (or browse) quite a few different projects, each needing a
   slightly different tool setup, and you want easy per-project configuration via
   `.dir-locals.el` or `dir-locals-set-directory-class`.
@@ -58,6 +59,9 @@ for TypeScript, JavaScript, CSS, Astro, Vue, and Svelte support.
   - [basedpyright](https://github.com/DetachHead/basedpyright) - fork of pyright
     with additional features. It can be installed globally or in a project-root
     `.venv`.
+  - [pyrefly](https://pyrefly.org/) - Meta's Python type checker and language
+    server, with Django and Pydantic support. It can be installed globally or in
+    a project-root `.venv`.
   - [rassumfrassum](https://github.com/joaotavora/rassumfrassum) (>= v0.3.3) -
     optional stdio multiplexer for combining multiple Python tools.
 
@@ -109,7 +113,7 @@ Then add it to your Emacs configuration:
 ```elisp
 (add-to-list 'load-path (expand-file-name "~/devel/eglot-python-preset"))
 (require 'eglot-python-preset)
-(setopt eglot-python-preset-lsp-server 'ty) ; or 'basedpyright or 'rass
+(setopt eglot-python-preset-lsp-server 'ty) ; or 'basedpyright, 'pyrefly, or 'rass
 ```
 
 or:
@@ -125,7 +129,7 @@ or:
 (use-package eglot-python-preset
   :ensure t
   :custom
-  (eglot-python-preset-lsp-server 'ty)) ; or 'basedpyright or 'rass
+  (eglot-python-preset-lsp-server 'ty)) ; or 'basedpyright, 'pyrefly, or 'rass
 ```
 
 ## Usage
@@ -202,6 +206,8 @@ Choose which language server to use:
 ;; or
 (setopt eglot-python-preset-lsp-server 'basedpyright)
 ;; or
+(setopt eglot-python-preset-lsp-server 'pyrefly)
+;; or
 (setopt eglot-python-preset-lsp-server 'rass)
 ```
 
@@ -230,6 +236,18 @@ configuration files:
         '(ty
           ["ruff" "--isolated" "server"]))
 ```
+
+For Pyrefly projects, the most useful `rass` combination is usually Pyrefly plus
+Ruff. Pyrefly provides Python language services and type diagnostics, while Ruff
+provides lint diagnostics, fixes, formatting, and import organization:
+
+```elisp
+(setopt eglot-python-preset-lsp-server 'rass)
+(setopt eglot-python-preset-rass-tools '(pyrefly ruff))
+```
+
+Combining Pyrefly with ty or basedpyright is not recommended as a default,
+because those tools all act as primary Python type or language servers.
 
 ### `eglot-python-preset-rass-command`
 
@@ -280,6 +298,19 @@ directory from growing without bound:
 (setopt eglot-python-preset-rass-max-contextual-presets 50) ; default
 ```
 
+### `eglot-python-preset-pyrefly-display-type-errors`
+
+Controls Pyrefly's `pyrefly.displayTypeErrors` initialization option:
+
+```elisp
+(setopt eglot-python-preset-pyrefly-display-type-errors 'default) ; default
+```
+
+Valid values are `default`, `force-on`, `force-off`, and
+`error-missing-imports`. With Pyrefly's default behavior, type-check diagnostics
+are shown when a Pyrefly configuration covers the file, such as `pyrefly.toml`
+or a `[tool.pyrefly]` section in `pyproject.toml`.
+
 ### Workspace Configuration (basedpyright)
 
 To customize basedpyright settings, set `eglot-workspace-configuration`. Your
@@ -328,9 +359,12 @@ prompting:
      (eglot-python-preset-rass-tools . (ty ruff)))))
 ```
 
-- `eglot-python-preset-lsp-server` accepts `ty`, `basedpyright`, or `rass`.
+- `eglot-python-preset-lsp-server` accepts `ty`, `basedpyright`, `pyrefly`, or
+  `rass`.
 - `eglot-python-preset-rass-tools` accepts lists of known tool symbols (`ty`,
-  `ruff`, `basedpyright`).
+  `ruff`, `basedpyright`, `pyrefly`).
+- `eglot-python-preset-pyrefly-display-type-errors` accepts `default`,
+  `force-on`, `force-off`, or `error-missing-imports`.
 - `eglot-python-preset-python-modes` accepts lists of symbols.
 - `eglot-python-preset-python-project-markers` accepts lists of filename
   strings.
@@ -358,9 +392,9 @@ project.
 
 - Eglot publishes diagnostics through Flymake. If you are using Flycheck, you
   will need separate bridge or integration configuration in your Emacs setup.
-- If `ty` or `basedpyright-langserver` is installed only in a project-local
-  `.venv`, make sure you are using v0.3.0 or later so this package can prefer
-  that executable automatically.
+- If `ty`, `basedpyright-langserver`, or `pyrefly` is installed only in a
+  project-local `.venv`, make sure you are using v0.3.0 or later so this package
+  can prefer that executable automatically.
 - If you use the `rass` backend, the package generates a preset under your Emacs
   directory and updates it as needed. Context-free presets are reused across
   buffers, while PEP-723 and project-local `.venv` cases keep separate generated
@@ -370,10 +404,10 @@ project.
 
 - The package uses `uv` for all Python environment management. Ensure `uv` is
   installed and in your PATH.
-- For standard Python projects, the package prefers `ty` or
-  `basedpyright-langserver` from a project-root `.venv` and otherwise falls back
-  to PATH. The same resolution is used for supported tools in generated `rass`
-  presets.
+- For standard Python projects, the package prefers `ty`,
+  `basedpyright-langserver`, or `pyrefly` from a project-root `.venv` and
+  otherwise falls back to PATH. The same resolution is used for supported tools
+  in generated `rass` presets.
 - For PEP-723 scripts, environments are cached by `uv` and shared across
   sessions.
 - If you see a warning about the environment not being synced, run

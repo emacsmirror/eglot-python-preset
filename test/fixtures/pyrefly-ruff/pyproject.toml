@@ -1,0 +1,5 @@
+[project]
+name = "pyrefly-ruff-smoke"
+version = "0.0.0"
+
+[tool.pyrefly]

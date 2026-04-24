@@ -9,6 +9,7 @@ from rassumfrassum.util import dmerge
 SERVERS: list[list[str]] = __SERVERS__  # type: ignore[name-defined]
 TY_CONFIGURATION: dict[str, Any] | None = __TY_CONFIGURATION__  # type: ignore[name-defined]
 BASEDPYRIGHT_CONFIGURATION: dict[str, Any] | None = __BASEDPYRIGHT_CONFIGURATION__  # type: ignore[name-defined]
+PYREFLY_CONFIGURATION: dict[str, Any] | None = __PYREFLY_CONFIGURATION__  # type: ignore[name-defined]
 
 
 def _server_kind(name: str) -> str | None:
@@ -17,6 +18,8 @@ def _server_kind(name: str) -> str | None:
         base = base.rsplit(".", 1)[0]
     if base in ("basedpyright", "basedpyright-langserver"):
         return "basedpyright"
+    if base == "pyrefly":
+        return "pyrefly"
     if base == "ruff":
         return "ruff"
     if base == "ty":
@@ -52,6 +55,11 @@ class GeneratedPythonLogic(LspLogic):
             params["initializationOptions"] = dmerge(
                 params.get("initializationOptions") or {},
                 TY_CONFIGURATION,
+            )
+        if method == "initialize" and PYREFLY_CONFIGURATION:
+            params["initializationOptions"] = dmerge(
+                params.get("initializationOptions") or {},
+                PYREFLY_CONFIGURATION,
             )
         return await super().on_client_request(method, params, servers)
 

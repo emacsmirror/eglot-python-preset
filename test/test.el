@@ -395,6 +395,23 @@ each match at least one actual source."
                       :root [,(file-name-directory my-test-test-script-1)])))
                   (eglot-python-preset--init-options))))))))
 
+(ert-deftest eglot-python-preset-pyrefly-init-options-use-pep723-context ()
+  (my-test-with-file-buffer
+   my-test-test-script-1
+   (lambda ()
+     (cl-letf (((symbol-function 'eglot-python-preset-get-python-path)
+                (lambda (_script-path) "/tmp/fake-env/bin/python3")))
+       (let ((eglot-python-preset-lsp-server 'pyrefly))
+         (should (equal
+                  '(:pythonPath "/tmp/fake-env/bin/python3")
+                  (eglot-python-preset--init-options))))))))
+
+(ert-deftest eglot-python-preset-pyrefly-init-options-include-display-errors ()
+  (let ((eglot-python-preset-lsp-server 'pyrefly)
+        (eglot-python-preset-pyrefly-display-type-errors 'force-on))
+    (should (equal '(:pyrefly (:displayTypeErrors "force-on"))
+                   (eglot-python-preset--init-options)))))
+
 (ert-deftest eglot-python-preset-ty-contact-prefers-local-venv ()
   (let ((eglot-python-preset-lsp-server 'ty)
         (project-dir (make-temp-file "test-project" t)))
@@ -431,6 +448,25 @@ each match at least one actual source."
            python-file
            (lambda ()
              (should (equal (list langserver-path "--stdio")
+                            (eglot-python-preset--server-contact nil))))))
+      (delete-directory project-dir t))))
+
+(ert-deftest eglot-python-preset-pyrefly-contact-prefers-local-venv ()
+  (let ((eglot-python-preset-lsp-server 'pyrefly)
+        (project-dir (make-temp-file "test-project" t)))
+    (unwind-protect
+        (let* ((venv-bin-dir (expand-file-name ".venv/bin" project-dir))
+               (pyrefly-path (expand-file-name "pyrefly" venv-bin-dir))
+               (python-file (expand-file-name "main.py" project-dir)))
+          (make-directory venv-bin-dir t)
+          (with-temp-file (expand-file-name "pyproject.toml" project-dir))
+          (my-test-write-executable pyrefly-path)
+          (with-temp-file python-file
+            (insert "print('hello')\n"))
+          (my-test-with-file-buffer
+           python-file
+           (lambda ()
+             (should (equal (list pyrefly-path "lsp")
                             (eglot-python-preset--server-contact nil))))))
       (delete-directory project-dir t))))
 
@@ -731,6 +767,27 @@ each match at least one actual source."
                      "TY_CONFIGURATION: dict[str, Any] | None = None")))))
       (delete-directory project-dir t))))
 
+(ert-deftest eglot-python-preset-rass-preserves-pyrefly-symbol-config ()
+  (let ((project-dir (make-temp-file "rass-pyrefly" t)))
+    (unwind-protect
+        (let* ((venv-bin-dir (expand-file-name ".venv/bin" project-dir))
+               (pyrefly-path (expand-file-name "pyrefly" venv-bin-dir))
+               (python-file (expand-file-name "main.py" project-dir))
+               (fake-python "/tmp/rass-pyrefly/bin/python3"))
+          (make-directory venv-bin-dir t)
+          (my-test-write-executable pyrefly-path)
+          (my-test-write-script-metadata-file python-file)
+          (cl-letf (((symbol-function 'eglot-python-preset-get-python-path)
+                     (lambda (_file-path) fake-python)))
+            (let ((preset-path (my-test-rass-preset-path python-file '(pyrefly))))
+              (should (file-exists-p preset-path))
+              (my-test-assert-file-contains-all
+               preset-path
+               (list pyrefly-path
+                     "\"pythonPath\":\"/tmp/rass-pyrefly/bin/python3\""
+                     "PYREFLY_CONFIGURATION: dict[str, Any] | None =")))))
+      (delete-directory project-dir t))))
+
 (ert-deftest eglot-python-preset-rass-template-helper-unit-checks-pass ()
   (let ((python-file (make-temp-file "rass-template" nil ".py" "print('hello')\n")))
     (unwind-protect
@@ -741,6 +798,7 @@ each match at least one actual source."
                (payload (alist-get 'responsePayload result)))
           (should (equal "basedpyright" (alist-get 'basedpyright server-kind nil nil #'equal)))
           (should (equal "basedpyright" (alist-get 'basedpyright-langserver server-kind nil nil #'equal)))
+          (should (equal "pyrefly" (alist-get 'pyrefly server-kind nil nil #'equal)))
           (should (equal "ruff" (alist-get 'ruff server-kind nil nil #'equal)))
           (should (equal "ty" (alist-get 'ty server-kind nil nil #'equal)))
           (should-not (alist-get 'unknown server-kind))
@@ -872,6 +930,7 @@ each match at least one actual source."
 
 (ert-deftest eglot-python-preset-rass-tools-custom-type-accepts-symbols-and-vectors ()
   (should (my-test-rass-tools-type-matches-p '(ty ruff)))
+  (should (my-test-rass-tools-type-matches-p '(pyrefly ruff)))
   (should (my-test-rass-tools-type-matches-p '(ty ["custom-lsp" "--stdio"]))))
 
 (ert-deftest eglot-python-preset-rass-command-custom-type-accepts-nil-and-vectors ()
@@ -917,6 +976,7 @@ each match at least one actual source."
 (ert-deftest eglot-python-preset-lsp-server-safe-local-variable ()
   (should (eglot-python-preset--lsp-server-safe-p 'ty))
   (should (eglot-python-preset--lsp-server-safe-p 'basedpyright))
+  (should (eglot-python-preset--lsp-server-safe-p 'pyrefly))
   (should (eglot-python-preset--lsp-server-safe-p 'rass))
   (should-not (eglot-python-preset--lsp-server-safe-p 'unknown))
   (should-not (eglot-python-preset--lsp-server-safe-p "ty"))
@@ -924,11 +984,20 @@ each match at least one actual source."
 
 (ert-deftest eglot-python-preset-rass-tools-safe-local-variable ()
   (should (eglot-python-preset--rass-tools-safe-p '(ty ruff)))
-  (should (eglot-python-preset--rass-tools-safe-p '(ty ruff basedpyright)))
+  (should (eglot-python-preset--rass-tools-safe-p '(ty ruff basedpyright pyrefly)))
   (should (eglot-python-preset--rass-tools-safe-p '()))
   (should-not (eglot-python-preset--rass-tools-safe-p '(ty ["ruff" "server"])))
   (should-not (eglot-python-preset--rass-tools-safe-p '(unknown)))
   (should-not (eglot-python-preset--rass-tools-safe-p "ty")))
+
+(ert-deftest eglot-python-preset-pyrefly-display-errors-safe-local-variable ()
+  (should (eglot-python-preset--pyrefly-display-type-errors-safe-p 'default))
+  (should (eglot-python-preset--pyrefly-display-type-errors-safe-p 'force-on))
+  (should (eglot-python-preset--pyrefly-display-type-errors-safe-p 'force-off))
+  (should (eglot-python-preset--pyrefly-display-type-errors-safe-p
+           'error-missing-imports))
+  (should-not (eglot-python-preset--pyrefly-display-type-errors-safe-p "default"))
+  (should-not (eglot-python-preset--pyrefly-display-type-errors-safe-p 'unknown)))
 
 (ert-deftest eglot-python-preset-python-modes-safe-local-variable ()
   (should (eglot-python-preset--modes-safe-p
@@ -1226,6 +1295,56 @@ the Python project boundary."
                       (,valid . "python"))
                     tmp-dir)))
       (my-test--assert-file-diagnostics result unused '("F401") '("ruff"))
+      (my-test--assert-file-diagnostics result valid '()))))
+
+(ert-deftest eglot-python-preset-rass-live-real-pyrefly-smoke ()
+  (skip-unless (my-test-live-tests-enabled-p))
+  (skip-unless (executable-find "python3"))
+  (skip-unless (executable-find "rass"))
+  (skip-unless (executable-find "pyrefly"))
+  (my-test-with-tmp-dir tmp-dir
+    (my-test--setup-fixture-dir "pyrefly" tmp-dir)
+    (let* ((unresolved (expand-file-name "unresolved-import.py" tmp-dir))
+           (type-error (expand-file-name "type-error.py" tmp-dir))
+           (valid (expand-file-name "valid.py" tmp-dir))
+           (preset-path (my-test-rass-preset-path unresolved '(pyrefly)))
+           (result (my-test--run-rass-session
+                    preset-path
+                    `((,unresolved . "python")
+                      (,type-error . "python")
+                      (,valid . "python"))
+                    tmp-dir
+                    12)))
+      (my-test--assert-file-diagnostics
+       result unresolved '("missing-import" "unused-import") '("Pyrefly"))
+      (my-test--assert-file-diagnostics
+       result type-error '("bad-argument-type") '("Pyrefly"))
+      (my-test--assert-file-diagnostics result valid '()))))
+
+(ert-deftest eglot-python-preset-rass-live-real-pyrefly-ruff-smoke ()
+  (skip-unless (my-test-live-tests-enabled-p))
+  (skip-unless (executable-find "python3"))
+  (skip-unless (executable-find "rass"))
+  (skip-unless (executable-find "pyrefly"))
+  (skip-unless (executable-find "ruff"))
+  (my-test-with-tmp-dir tmp-dir
+    (my-test--setup-fixture-dir "pyrefly-ruff" tmp-dir)
+    (let* ((unresolved (expand-file-name "unresolved-import.py" tmp-dir))
+           (type-error (expand-file-name "type-error.py" tmp-dir))
+           (valid (expand-file-name "valid.py" tmp-dir))
+           (preset-path (my-test-rass-preset-path unresolved '(pyrefly ruff)))
+           (result (my-test--run-rass-session
+                    preset-path
+                    `((,unresolved . "python")
+                      (,type-error . "python")
+                      (,valid . "python"))
+                    tmp-dir
+                    12)))
+      (my-test--assert-file-diagnostics
+       result unresolved '("F401" "missing-import" "unused-import")
+       '("Pyrefly" "Ruff"))
+      (my-test--assert-file-diagnostics
+       result type-error '("bad-argument-type") '("Pyrefly"))
       (my-test--assert-file-diagnostics result valid '()))))
 
 (ert-deftest eglot-python-preset-rass-live-real-ty-smoke ()

@@ -55,6 +55,7 @@ def main():
     server_kind = {
         "basedpyright": module._server_kind("basedpyright"),
         "basedpyright-langserver": module._server_kind("basedpyright-langserver"),
+        "pyrefly": module._server_kind("pyrefly"),
         "ruff": module._server_kind("ruff"),
         "ty": module._server_kind("ty"),
         "unknown": module._server_kind("custom-lsp"),
